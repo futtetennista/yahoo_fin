@@ -1,9 +1,9 @@
 from setuptools import setup
 
 setup(name='yahoo_fin',
-      version='0.8.9.1',
+      version='0.8.9.2',
       description="""Download historical stock prices (daily / weekly / monthly),
-                     realtime-prices, fundamentals data, income statements, 
+                     realtime-prices, fundamentals data, income statements,
                      cash flows, analyst info, current cryptocurrency prices,
                      option chains, earnings history, and more with yahoo_fin.
                     """,
@@ -14,4 +14,4 @@ setup(name='yahoo_fin',
       packages=['yahoo_fin'],
       install_requires = ["requests_html", "feedparser", "requests", "pandas"],
       keywords = ["yahoo finance", "stocks", "options", "fundamentals"],
-zip_safe=False)
+      zip_safe=False)
