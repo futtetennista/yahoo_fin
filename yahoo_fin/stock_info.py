@@ -427,20 +427,22 @@ def _parse_table(json_info):
     return df
 
 
-def get_income_statement(ticker, yearly = True):
+def get_income_statement(ticker, country = "UK", yearly = True):
 
     '''Scrape income statement from Yahoo Finance for a given ticker
 
        @param: ticker
     '''
 
-    income_site = "https://finance.yahoo.com/quote/" + ticker + \
-            "/financials?p=" + ticker
-
-    json_info = _parse_json(income_site)
+    subdomain, ticker_ = ("uk.", f"{ticker}.l")  if country == "UK" else ("", ticker)
+    income_statement_page = f"https://{subdomain}finance.yahoo.com/quote/{ticker}/financials?p={ticker}"
+    json_info = _parse_json(income_statement_page)
 
     if yearly:
-        temp = json_info["incomeStatementHistory"]["incomeStatementHistory"]
+        try:
+            temp = json_info["incomeStatementHistory"]["incomeStatementHistory"]
+        except:
+            print(json_info)
     else:
         temp = json_info["incomeStatementHistoryQuarterly"]["incomeStatementHistory"]
 
@@ -471,52 +473,95 @@ def get_balance_sheet(ticker, yearly = True):
 
     return _parse_table(temp)
 
+def calculate_magic_formula(ticker, country = "UK"):
 
-def get_balance_sheet_insights(ticker, yearly = True):
-    balance_sheet_site = "https://finance.yahoo.com/quote/" + ticker + \
-                         "/balance-sheet?p=" + ticker
+    '''
+    Joel Greenblatt's 'Magic Formula' as illustrated in his book
+    'The litte book that still beats the market'
+    '''
 
-    json_info = _parse_json_series(balance_sheet_site)
-    # try:
-    #     if yearly:
-    #         temp = json_info["timeSeries"]
-    #     else:
-    #         temp = json_info["timeSeriesQuarterly"]
-    # except:
-    #     e = sys.exc_info()[0]
-    #     print(e)
-    #     temp = []
+    income_statement = get_income_statement(ticker, country)
+    balance_sheet_insights = get_balance_sheet_insights(ticker, country)
 
+    ebit = calculate_ebit(income_statement)
+    tangible_capital_employed = calculate_tangible_capital_employed(balance_sheet_insights)
+    net_working_capital = calculate_net_working_capital(balance_sheet_insights)
+
+    return ebit / (tangible_capital_employed + net_working_capital)
+
+def calculate_ebit(income_statement, year_end='2020-12-31'):
+
+    '''
+    Take the total revenue (that is, all the money that the firm brings in)
+    and then remove all of the firm’s operating expenses.
+    This includes line items such as the cost of goods and production,
+    salaries, rent and associated overhead and depreciation and amortization.
+
+    Another way of thinking about this is to calculate the firm’s net income,
+    then add back interest payments and tax payments.
+    What you have left represents the operating income of the firm.
+    In other words, its total revenue reduced by its costs to stay in business.
+    '''
+
+    net_income = income_statement.loc['netIncome', year_end]
+    taxes = income_statement.loc['incomeTaxExpense', year_end]
+    interest = income_statement.loc['interestExpense', year_end]
+    return net_income + taxes + interest
+
+def calculate_tangible_capital_employed(balance_sheet_insights, year_end = '2020-12-31'):
+    total_fixed_assets = balance_sheet_insights.loc['annualTotalNonCurrentAssets', year_end]
+    total_intangible_fixed_assets = balance_sheet_insights.loc['annualGoodwillAndOtherIntangibleAssets', year_end]
+    return total_fixed_assets - total_intangible_fixed_assets
+
+def calculate_net_working_capital(balance_sheet_insights, year_end = '2021-12-31'):
+
+    '''
+    There are at least 2 formulas to calculate this and
+    there's no general agreement on which one is superior.
+    The formula used here is:
+
+    Net Working Capital = Accounts Receivable + Inventory – Accounts Payable
+    '''
+
+    accounts_receivable = balance_sheet_insights.loc['annualAccountsReceivable', year_end]
+    accounts_payable = balance_sheet_insights.loc['annualAccountsPayable', year_end]
+    inventory = balance_sheet_insights.loc['inventory', year_end]
+
+    return accounts_receivable + inventory - accounts_payable
+
+def get_balance_sheet_insights(ticker, country = "UK", yearly = True):
+    subdomain, ticker_ = ("uk.", f"{ticker}.l")  if country == "UK" else ("", ticker)
+    balance_sheet_page = f"https://{subdomain}finance.yahoo.com/quote/{ticker_}/balance-sheet?p={ticker_}"
+
+    json_info = _parse_json_series(balance_sheet_page, yearly)
     return _parse_time_series_table(json_info)
 
-
-def _parse_json_series(url, headers = {'User-agent': 'Mozilla/5.0'}):
+def _parse_json_series(url, headers = {'User-agent': 'Mozilla/5.0'}, yearly = True):
     html = requests.get(url=url, headers = headers).text
 
     json_str = html.split('root.App.main =')[1].split('(this)')[0].split(';\n}')[0].strip()
 
     try:
         data = json.loads(json_str)['context']['dispatcher']['stores']['QuoteTimeSeriesStore']
-    except:
-        print(sys.exc_info())
-        return '{}'
-    else:
-        new_data = json.dumps(data).replace('{}', 'null')
-        new_data = re.sub(r'\{[\'|\"]raw[\'|\"]:(.*?),(.*?)\}', r'\1', new_data)
-        json_dict = json.loads(new_data)['timeSeries']
+        clean_data = json.dumps(data).replace('{}', 'null')
+        clean_data = re.sub(r'\{[\'|\"]raw[\'|\"]:(.*?),(.*?)\}', r'\1', clean_data)
+
+        if yearly:
+            json_dict = json.loads(clean_data)['timeSeries']
+        else:
+            json_dict = json.loads(clean_data)["timeSeriesQuarterly"]
         del json_dict['timestamp']
 
-
-        def filter_data(json_obj):
-            obj = {"2017-12-31": None, "2018-12-31": None, "2019-12-31": None, "2020-12-31": None}
+        def list_to_obj(json_obj):
+            empty_obj = { "2017-12-31": None, "2018-12-31": None, "2019-12-31": None, "2020-12-31": None }
             if json_obj != []:
                 for i in range(0, len(json_obj)):
                     years = json_obj[i]
                     if years != None:
-                        obj[years['asOfDate']] = years['reportedValue']
-            return obj
+                        empty_obj[years['asOfDate']] = years['reportedValue']
+            return empty_obj
             # return { k: json_obj[k] if json_obj != None else None for k in ['asOfDate', 'reportedValue'] }
-        obj = {}
+        # obj = {}
         # for k in json_dict.keys():
         #     print(f"Looking at key '{k}'")
         #     if json_dict.get(k, None) == None or json_dict.get(k, None) == []:
@@ -525,14 +570,15 @@ def _parse_json_series(url, headers = {'User-agent': 'Mozilla/5.0'}):
         #         print("Has elements")
         #         obj[k] = filter_data(json_dict[k])
         # return obj
-        return { k: filter_data(json_dict[k]) for k in json_dict.keys() }
+        return { k: list_to_obj(json_dict[k]) for k in json_dict.keys() }
 
+    except:
+        print(sys.exc_info())
 
 def _parse_time_series_table(json_info):
-    df = pd.read_json(json.dumps(json_info), orient='index')
-
-    if df.empty:
-        return df
+    return pd.read_json(json.dumps(json_info), orient='index')
+    # if df.empty:
+    #     return df
 
     # df.set_index("asOfDate", inplace=True)
     # df.index = pd.to_datetime(df.index)
@@ -540,9 +586,7 @@ def _parse_time_series_table(json_info):
     # df = df.transpose()
     # # # df.index.name = "Breakdown"
 
-    return df
-    # return json_info
-
+    # return df
 
 def get_cash_flow(ticker, yearly = True):
 
