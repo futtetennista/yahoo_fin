@@ -397,8 +397,9 @@ def _parse_json(url, headers = {'User-agent': 'Mozilla/5.0'}):
     try:
         data = json.loads(json_str)['context']['dispatcher']['stores']['QuoteSummaryStore']
     except:
-        print(sys.exc_info()[0])
-        return '{}'
+        print(sys.exc_info())
+        print(json.loads(json_str)['context']['dispatcher']['stores'].keys())
+        raise ValueError('Cannot find QuoteSummaryStore')
     else:
         # return data
         new_data = json.dumps(data).replace('{}', 'null')
@@ -435,7 +436,7 @@ def get_income_statement(ticker, country = "UK", yearly = True):
     '''
 
     subdomain, ticker_ = ("uk.", f"{ticker}.l")  if country == "UK" else ("", ticker)
-    income_statement_page = f"https://{subdomain}finance.yahoo.com/quote/{ticker}/financials?p={ticker}"
+    income_statement_page = f"https://{subdomain}finance.yahoo.com/quote/{ticker_}/financials?p={ticker_}"
     json_info = _parse_json(income_statement_page)
 
     if yearly:
@@ -473,7 +474,7 @@ def get_balance_sheet(ticker, yearly = True):
 
     return _parse_table(temp)
 
-def calculate_magic_formula(ticker, country = "UK"):
+def calculate_magic_formula(ticker, country = "UK", year = "2020"):
 
     '''
     Joel Greenblatt's 'Magic Formula' as illustrated in his book
@@ -483,37 +484,44 @@ def calculate_magic_formula(ticker, country = "UK"):
     income_statement = get_income_statement(ticker, country)
     balance_sheet_insights = get_balance_sheet_insights(ticker, country)
 
-    ebit = calculate_ebit(income_statement)
-    tangible_capital_employed = calculate_tangible_capital_employed(balance_sheet_insights)
-    net_working_capital = calculate_net_working_capital(balance_sheet_insights)
+    ebit = income_statement.loc['ebit'].filter(regex=f"{year}.*")[0]
+    tangible_capital_employed = calculate_tangible_capital_employed(balance_sheet_insights, year)
+    net_working_capital = calculate_net_working_capital(balance_sheet_insights, year)
 
     return ebit / (tangible_capital_employed + net_working_capital)
 
-def calculate_ebit(income_statement, year_end='2020-12-31'):
+# def calculate_ebit(income_statement, year='2020'):
+#
+#     '''
+#     Take the total revenue (that is, all the money that the firm brings in)
+#     and then remove all of the firm’s operating expenses.
+#     This includes line items such as the cost of goods and production,
+#     salaries, rent and associated overhead and depreciation and amortization.
+#
+#     Another way of thinking about this is to calculate the firm’s net income,
+#     then add back interest payments and tax payments.
+#     What you have left represents the operating income of the firm.
+#     In other words, its total revenue reduced by its costs to stay in business.
+#     '''
+#
+#     net_income = income_statement.loc['netIncome'].filter(regex=f"{year}.*")[0]
+#     taxes = income_statement.loc['incomeTaxExpense'].filter(regex=f"{year}.*")[0]
+#     # interest = - income_statement.loc['interestExpense'].filter(regex=f"{year}.*")[0]
+#     other = - income_statement.loc['totalOtherIncomeExpenseNet'].filter(regex=f"{year}.*")[0]
+#     # print(net_income)
+#     # print(taxes)
+#     # print(interest)
+#     # print(other)
+#     return net_income + taxes + other
+#     # return net_income + taxes + interest + other
 
-    '''
-    Take the total revenue (that is, all the money that the firm brings in)
-    and then remove all of the firm’s operating expenses.
-    This includes line items such as the cost of goods and production,
-    salaries, rent and associated overhead and depreciation and amortization.
+def calculate_tangible_capital_employed(balance_sheet_insights, year = '2020'):
+    total_fixed_assets = balance_sheet_insights.loc['annualTotalNonCurrentAssets'].filter(regex=f"{year}.*")[0]
+    intangible_assets = balance_sheet_insights.loc['annualOtherIntangibleAssets'].filter(regex=f"{year}.*")[0]
+    goodwill = balance_sheet_insights.loc['annualGoodwill'].filter(regex=f"{year}.*")[0]
+    return total_fixed_assets - intangible_assets - goodwill
 
-    Another way of thinking about this is to calculate the firm’s net income,
-    then add back interest payments and tax payments.
-    What you have left represents the operating income of the firm.
-    In other words, its total revenue reduced by its costs to stay in business.
-    '''
-
-    net_income = income_statement.loc['netIncome', year_end]
-    taxes = income_statement.loc['incomeTaxExpense', year_end]
-    interest = income_statement.loc['interestExpense', year_end]
-    return net_income + taxes + interest
-
-def calculate_tangible_capital_employed(balance_sheet_insights, year_end = '2020-12-31'):
-    total_fixed_assets = balance_sheet_insights.loc['annualTotalNonCurrentAssets', year_end]
-    total_intangible_fixed_assets = balance_sheet_insights.loc['annualGoodwillAndOtherIntangibleAssets', year_end]
-    return total_fixed_assets - total_intangible_fixed_assets
-
-def calculate_net_working_capital(balance_sheet_insights, year_end = '2021-12-31'):
+def calculate_net_working_capital(balance_sheet_insights, year = '2020'):
 
     '''
     There are at least 2 formulas to calculate this and
@@ -523,9 +531,9 @@ def calculate_net_working_capital(balance_sheet_insights, year_end = '2021-12-31
     Net Working Capital = Accounts Receivable + Inventory – Accounts Payable
     '''
 
-    accounts_receivable = balance_sheet_insights.loc['annualAccountsReceivable', year_end]
-    accounts_payable = balance_sheet_insights.loc['annualAccountsPayable', year_end]
-    inventory = balance_sheet_insights.loc['inventory', year_end]
+    accounts_receivable = balance_sheet_insights.loc['annualAccountsReceivable'].replace(regex=f"{year}.*")[0]
+    accounts_payable = balance_sheet_insights.loc['annualAccountsPayable'].replace(regex=f"{year}.*")[0]
+    inventory = balance_sheet_insights.loc['annualInventory'].replace(regex=f"{year}.*")[0]
 
     return accounts_receivable + inventory - accounts_payable
 
@@ -533,12 +541,11 @@ def get_balance_sheet_insights(ticker, country = "UK", yearly = True):
     subdomain, ticker_ = ("uk.", f"{ticker}.l")  if country == "UK" else ("", ticker)
     balance_sheet_page = f"https://{subdomain}finance.yahoo.com/quote/{ticker_}/balance-sheet?p={ticker_}"
 
-    json_info = _parse_json_series(balance_sheet_page, yearly)
+    json_info = _parse_json_series(balance_sheet_page, yearly = yearly)
     return _parse_time_series_table(json_info)
 
 def _parse_json_series(url, headers = {'User-agent': 'Mozilla/5.0'}, yearly = True):
     html = requests.get(url=url, headers = headers).text
-
     json_str = html.split('root.App.main =')[1].split('(this)')[0].split(';\n}')[0].strip()
 
     try:
