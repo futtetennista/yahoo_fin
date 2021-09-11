@@ -599,9 +599,14 @@ def _parse_json_series(url, headers = {'User-agent': 'Mozilla/5.0'}, yearly = Tr
 
 def _parse_time_series_table(json_info):
     df = pd.read_json(json.dumps(json_info), orient='index')
+    # print(json_info)
+    # df = pd.DataFrame(json_info)
     # TODO: is this actually safe?
-    df.fillna(0)
+    df.fillna(0, inplace=True)
     df = df[df.columns.sort_values(ascending=False)]
+    df.columns.name = "asOfDate"
+    df.index.name = "Breakdown"
+
     return df
 
     # if df.empty:
