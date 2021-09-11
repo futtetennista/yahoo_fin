@@ -484,11 +484,17 @@ def calculate_magic_formula(ticker, country = "UK", year = "2020"):
     income_statement = get_income_statement(ticker, country)
     balance_sheet_insights = get_balance_sheet_insights(ticker, country)
 
-    ebit = income_statement.loc['ebit'].filter(regex=f"{year}.*")[0]
+    ebit = income_statement.loc['ebit'][0]
+    print(f"ebit: {ebit}")
     tangible_capital_employed = calculate_tangible_capital_employed(balance_sheet_insights, year)
+    print(f"tangible_capital_employed: {tangible_capital_employed}")
     net_working_capital = calculate_net_working_capital(balance_sheet_insights, year)
+    print(f"net_working_capital: {net_working_capital}")
 
-    return ebit / (tangible_capital_employed + net_working_capital)
+    if tangible_capital_employed == 0 and net_working_capital == 0:
+        print("Cannot calculate magic formula: denominator in the formula is 0")
+    else:
+        return ebit / (tangible_capital_employed + net_working_capital), income_statement, balance_sheet_insights
 
 # def calculate_ebit(income_statement, year='2020'):
 #
@@ -516,9 +522,15 @@ def calculate_magic_formula(ticker, country = "UK", year = "2020"):
 #     # return net_income + taxes + interest + other
 
 def calculate_tangible_capital_employed(balance_sheet_insights, year = '2020'):
-    total_fixed_assets = balance_sheet_insights.loc['annualTotalNonCurrentAssets'].filter(regex=f"{year}.*")[0]
-    intangible_assets = balance_sheet_insights.loc['annualOtherIntangibleAssets'].filter(regex=f"{year}.*")[0]
-    goodwill = balance_sheet_insights.loc['annualGoodwill'].filter(regex=f"{year}.*")[0]
+    total_fixed_assets = balance_sheet_insights.loc['annualTotalNonCurrentAssets'][0]
+    intangible_assets = balance_sheet_insights.loc['annualOtherIntangibleAssets'][0]
+    if 'annualGoodwill' in balance_sheet_insights.columns:
+        goodwill = balance_sheet_insights.loc['annualGoodwill'][0]
+    else:
+        goodwill = 0
+    print(f"total_fixed_assets: {total_fixed_assets}")
+    print(f"intangible_assets: {intangible_assets}")
+    print(f"goodwill: {goodwill}")
     return total_fixed_assets - intangible_assets - goodwill
 
 def calculate_net_working_capital(balance_sheet_insights, year = '2020'):
@@ -531,9 +543,12 @@ def calculate_net_working_capital(balance_sheet_insights, year = '2020'):
     Net Working Capital = Accounts Receivable + Inventory – Accounts Payable
     '''
 
-    accounts_receivable = balance_sheet_insights.loc['annualAccountsReceivable'].replace(regex=f"{year}.*")[0]
-    accounts_payable = balance_sheet_insights.loc['annualAccountsPayable'].replace(regex=f"{year}.*")[0]
-    inventory = balance_sheet_insights.loc['annualInventory'].replace(regex=f"{year}.*")[0]
+    accounts_receivable = balance_sheet_insights.loc['annualAccountsReceivable'][0]
+    inventory = balance_sheet_insights.loc['annualInventory'][0]
+    accounts_payable = balance_sheet_insights.loc['annualAccountsPayable'][0]
+    print(f"accounts_receivable: {accounts_receivable}")
+    print(f"inventory: {inventory}")
+    print(f"accounts_payable: {accounts_payable}")
 
     return accounts_receivable + inventory - accounts_payable
 
@@ -560,7 +575,7 @@ def _parse_json_series(url, headers = {'User-agent': 'Mozilla/5.0'}, yearly = Tr
         del json_dict['timestamp']
 
         def list_to_obj(json_obj):
-            empty_obj = { "2017-12-31": None, "2018-12-31": None, "2019-12-31": None, "2020-12-31": None }
+            empty_obj = {}
             if json_obj != []:
                 for i in range(0, len(json_obj)):
                     years = json_obj[i]
@@ -583,7 +598,12 @@ def _parse_json_series(url, headers = {'User-agent': 'Mozilla/5.0'}, yearly = Tr
         print(sys.exc_info())
 
 def _parse_time_series_table(json_info):
-    return pd.read_json(json.dumps(json_info), orient='index')
+    df = pd.read_json(json.dumps(json_info), orient='index')
+    # TODO: is this actually safe?
+    df.fillna(0)
+    df = df[df.columns.sort_values(ascending=False)]
+    return df
+
     # if df.empty:
     #     return df
 
